@@ -6,29 +6,34 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "next lint",
+    "db:seed": "npx tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
-    "@upstash/redis": "^1.38.0",
-    "dotenv": "^17.4.2",
-    "next": "16.2.6",
-    "prisma": "^7.8.0",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "sonner": "^2.0.7",
-    "zod": "^4.4.3"
+    "@types/pg": "^8.20.0",
+    "@upstash/redis": "^1.34.4",
+    "dotenv": "^16.4.7",
+    "next": "15.1.6",
+    "pg": "^8.21.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sonner": "^1.7.4",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20.19.41",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "@vitest/ui": "^4.1.7",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.6",
-    "tailwindcss": "^4",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.7"
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.13.1",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@vitest/ui": "^3.0.4",
+    "eslint": "^9.19.0",
+    "eslint-config-next": "15.1.6",
+    "prisma": "^7.8.0",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.4"
   }
 }
