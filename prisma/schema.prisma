@@ -1,21 +1,97 @@
-datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
-}
-
 generator client {
   provider = "prisma-client-js"
 }
-REDIS_URL="rediss://default:gQAAAAAAAZcCAAIgcDI4NTJhZmQ5NGM4YjM0ODllOWIzMWVhZDA3Y2Q3ZDI5Yw@sharp-guppy-104194.upstash.io:6379"
-SENTRY_DSN="https://74cf3ed5345e22f054d6690cb82b2b30@o4511439787720704.ingest.us.sentry.io/4511439811313664"
-# Cron
-CRON_SECRET="63ecb4fb43e936511a58066bb2d34a41bd9a2de940989f64da2cf8a11ea89745"
 
-# Environment
-NODE_ENV="development"
+datasource db {
+  provider = "postgresql"
+}
 
+enum ReservationStatus {
+  pending
+  confirmed
+  released
+}
 
+model Product {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  description String?
+  price       Decimal          @db.Decimal(10, 2)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
 
+  stock       Stock[]
+  items       ReservationItem[]
 
+  @@index([name])
+}
 
+model Warehouse {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  location    String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  stock       Stock[]
+  items       ReservationItem[]
+
+  @@index([name])
+}
+
+model Stock {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId     String    @db.Uuid
+  warehouseId   String    @db.Uuid
+  totalUnits    Int
+  reservedUnits Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  product       Product   @relation(fields: [productId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  warehouse     Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([productId, warehouseId])
+  @@index([productId])
+  @@index([warehouseId])
+  @@index([warehouseId, productId])
+}
+
+model Reservation {
+  id           String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  customerId   String             @db.Text
+  status       ReservationStatus   @default(pending)
+  expiresAt    DateTime
+  createdAt    DateTime           @default(now())
+  confirmedAt  DateTime?
+  releasedAt   DateTime?
+  updatedAt    DateTime           @updatedAt
+
+  items        ReservationItem[]
+
+  @@index([status])
+  @@index([expiresAt])
+  @@index([customerId])
+  @@index([customerId, status])
+  @@index([status, expiresAt])
+}
+
+model ReservationItem {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reservationId String      @db.Uuid
+  productId     String      @db.Uuid
+  warehouseId   String      @db.Uuid
+  quantity      Int
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  product       Product     @relation(fields: [productId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  warehouse     Warehouse   @relation(fields: [warehouseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([reservationId, productId, warehouseId])
+  @@index([reservationId])
+  @@index([productId])
+  @@index([warehouseId])
+  @@index([productId, warehouseId])
+}
