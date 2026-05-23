@@ -1,9 +1,16 @@
-import {
+﻿import {
   Prisma,
   PrismaClient,
   ReservationStatus,
 } from '@prisma/client'
-import { ValidationError, OutOfStockError, DatabaseError } from '@/lib/errors'
+import { 
+  ValidationError, 
+  OutOfStockError, 
+  DatabaseError,
+  NotFoundError,
+  ExpiredReservationError,
+  InvalidReservationStateError
+} from '@/lib/errors'
 
 const prisma = new PrismaClient()
 
@@ -18,6 +25,8 @@ export interface ReservationResponse {
   customerId: string
   status: ReservationStatus
   expiresAt: Date
+  confirmedAt?: Date | null
+  releasedAt?: Date | null
   items: ReservationItemResponse[]
 }
 
@@ -132,5 +141,182 @@ export async function reserve(
     }
 
     throw new DatabaseError('Unknown reservation failure')
+  }
+}
+
+export class ReservationService {
+  static async confirmReservation(
+    reservationId: string,
+  ): Promise<ReservationResponse> {
+    if (!reservationId) {
+      throw new ValidationError('reservationId is required')
+    }
+
+    try {
+      return await prisma.$transaction(
+        async (tx) => {
+          const rows = await tx.$queryRaw<
+            Array<{
+              id: string
+              customerId: string
+              status: ReservationStatus
+              expiresAt: Date
+              confirmedAt: Date | null
+              releasedAt: Date | null
+            }>
+          >`
+            SELECT *
+            FROM "Reservation"
+            WHERE "id" = ${reservationId}
+            FOR UPDATE NOWAIT
+          `
+
+          if (rows.length === 0) {
+            throw new NotFoundError('Reservation not found')
+          }
+
+          const reservation = rows[0]
+
+          if (reservation.status !== ReservationStatus.pending) {
+            throw new InvalidReservationStateError(
+              `Reservation status is ${reservation.status}, expected pending`,
+            )
+          }
+
+          if (new Date(reservation.expiresAt) < new Date()) {
+            throw new ExpiredReservationError('Reservation has expired')
+          }
+
+          const updated = await tx.reservation.update({
+            where: { id: reservationId },
+            data: {
+              status: ReservationStatus.confirmed,
+              confirmedAt: new Date(),
+            },
+            include: { items: true },
+          })
+
+          return {
+            id: updated.id,
+            customerId: updated.customerId,
+            status: updated.status,
+            expiresAt: updated.expiresAt,
+            confirmedAt: updated.confirmedAt,
+            releasedAt: updated.releasedAt,
+            items: updated.items.map((item) => ({
+              productId: item.productId,
+              warehouseId: item.warehouseId,
+              quantity: item.quantity,
+            })),
+          }
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        },
+      )
+    } catch (error: unknown) {
+      if (
+        error instanceof ValidationError ||
+        error instanceof NotFoundError ||
+        error instanceof ExpiredReservationError ||
+        error instanceof InvalidReservationStateError
+      ) {
+        throw error
+      }
+
+      if (error instanceof Error) {
+        throw new DatabaseError(`Failed to confirm reservation: ${error.message}`)
+      }
+
+      throw new DatabaseError('Unknown confirmation failure')
+    }
+  }
+
+  static async releaseReservation(
+    reservationId: string,
+  ): Promise<boolean> {
+    if (!reservationId) {
+      throw new ValidationError('reservationId is required')
+    }
+
+    try {
+      return await prisma.$transaction(
+        async (tx) => {
+          const rows = await tx.$queryRaw<
+            Array<{ id: string; status: ReservationStatus }>
+          >`
+            SELECT *
+            FROM "Reservation"
+            WHERE "id" = ${reservationId}
+            FOR UPDATE NOWAIT
+          `
+
+          if (rows.length === 0) {
+            throw new NotFoundError('Reservation not found')
+          }
+
+          const reservation = rows[0]
+
+          if (
+            reservation.status === ReservationStatus.released ||
+            reservation.status === ReservationStatus.confirmed
+          ) {
+            return false
+          }
+
+          const items = await tx.reservationItem.findMany({
+            where: { reservationId },
+          })
+
+          for (const item of items) {
+            await tx.$queryRaw`
+              SELECT *
+              FROM "Stock"
+              WHERE "productId" = ${item.productId}
+                AND "warehouseId" = ${item.warehouseId}
+              FOR UPDATE
+            `
+
+            await tx.stock.update({
+              where: {
+                productId_warehouseId: {
+                  productId: item.productId,
+                  warehouseId: item.warehouseId,
+                },
+              },
+              data: {
+                reservedUnits: { decrement: item.quantity },
+              },
+            })
+          }
+
+          await tx.reservation.update({
+            where: { id: reservationId },
+            data: {
+              status: ReservationStatus.released,
+              releasedAt: new Date(),
+            },
+          })
+
+          return true
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        },
+      )
+    } catch (error: unknown) {
+      if (
+        error instanceof ValidationError ||
+        error instanceof NotFoundError
+      ) {
+        throw error
+      }
+
+      if (error instanceof Error) {
+        throw new DatabaseError(`Failed to release reservation: ${error.message}`)
+      }
+
+      throw new DatabaseError('Unknown release failure')
+    }
   }
 }
