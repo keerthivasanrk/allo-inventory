@@ -1,13 +1,21 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
 
 generator client {
-  provider = "prisma-client"
-  output   = "../app/generated/prisma"
+  provider = "prisma-client-js"
 }
+REDIS_URL="rediss://default:gQAAAAAAAZcCAAIgcDI4NTJhZmQ5NGM4YjM0ODllOWIzMWVhZDA3Y2Q3ZDI5Yw@sharp-guppy-104194.upstash.io:6379"
+SENTRY_DSN="https://74cf3ed5345e22f054d6690cb82b2b30@o4511439787720704.ingest.us.sentry.io/4511439811313664"
+# Cron
+CRON_SECRET="63ecb4fb43e936511a58066bb2d34a41bd9a2de940989f64da2cf8a11ea89745"
 
-datasource db {
-  provider = "postgresql"
-}
+# Environment
+NODE_ENV="development"
+
+
+
+
+
