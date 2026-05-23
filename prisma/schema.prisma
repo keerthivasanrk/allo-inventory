@@ -40,41 +40,62 @@ model Warehouse {
 }
 
 model Stock {
-  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  productId     String    @db.Uuid
-  warehouseId   String    @db.Uuid
-  totalUnits    Int
-  reservedUnits Int       @default(0)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
 
-  product       Product   @relation(fields: [productId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  warehouse     Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  productId      String    @db.Uuid
+  warehouseId    String    @db.Uuid
 
+  totalUnits     Int
+  reservedUnits  Int       @default(0)
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  product         Product   @relation(fields: [productId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  warehouse       Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  // Critical uniqueness constraint for inventory correctness
   @@unique([productId, warehouseId])
+
+  // Individual lookup indexes
   @@index([productId])
   @@index([warehouseId])
+
+  // Best for warehouse inventory listing queries
   @@index([warehouseId, productId])
+
+  // Optional reverse composite for product-first access
+  @@index([productId, warehouseId])
 }
 
 model Reservation {
   id           String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  customerId   String             @db.Text
+
+  customerId   String
   status       ReservationStatus   @default(pending)
+
   expiresAt    DateTime
-  createdAt    DateTime           @default(now())
+
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
   confirmedAt  DateTime?
   releasedAt   DateTime?
-  updatedAt    DateTime           @updatedAt
 
   items        ReservationItem[]
 
+  // Individual indexes
+  @@index([customerId])
   @@index([status])
   @@index([expiresAt])
-  @@index([customerId])
+
+  // Customer active reservations
   @@index([customerId, status])
+
+  // Expiry cleanup optimization
   @@index([status, expiresAt])
 }
+
 
 model ReservationItem {
   id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid

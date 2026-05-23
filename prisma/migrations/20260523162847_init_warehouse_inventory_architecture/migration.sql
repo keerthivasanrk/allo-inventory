@@ -126,3 +126,7 @@ ALTER TABLE "ReservationItem" ADD CONSTRAINT "ReservationItem_productId_fkey" FO
 
 -- AddForeignKey
 ALTER TABLE "ReservationItem" ADD CONSTRAINT "ReservationItem_warehouseId_fkey" FOREIGN KEY ("warehouseId") REFERENCES "Warehouse"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+CREATE INDEX IF NOT EXISTS "reservations_pending_expiry_idx" 
+ON "Reservation" ("expiresAt") 
+WHERE "status" = 'pending';
