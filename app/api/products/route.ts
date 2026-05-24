@@ -197,7 +197,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
 
     return NextResponse.json(
-      { error: "Internal server error", errorId: requestId },
+      { 
+        error: "Internal server error", 
+        errorId: requestId,
+        details: error instanceof Error ? error.message : String(error)
+      },
       { status: 500 },
     );
   }

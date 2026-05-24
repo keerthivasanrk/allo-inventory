@@ -57,10 +57,10 @@ export async function GET(): Promise<NextResponse> {
     });
 
     return NextResponse.json(
-      {
-        error: "INTERNAL_SERVER_ERROR",
+      { 
+        error: "Internal server error", 
         errorId: requestId,
-        message: "Database error - contact support with error ID",
+        details: error instanceof Error ? error.message : String(error)
       },
       { status: 500 },
     );

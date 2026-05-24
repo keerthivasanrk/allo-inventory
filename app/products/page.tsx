@@ -61,7 +61,7 @@ export default function ProductsPage() {
   // ── Reserve handler ───────────────────────────────────────────────────────
   const handleReserve = useCallback(
     async (productId: string, warehouseId: string) => {
-      const CUSTOMER_ID = 'demo-customer-id' // Replace with real auth session user ID
+      const CUSTOMER_ID = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' // Demo customer UUID
 
       setReservingId(productId)
       try {

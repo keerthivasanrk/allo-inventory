@@ -26,11 +26,13 @@ function sanitizeConnectionString(url: string | undefined): string | undefined {
 
 const connectionString = sanitizeConnectionString(process.env.DATABASE_URL);
 
-// Keep pool size low — Supabase free-tier has limited connection slots
+// Keep pool size very low — Supabase free-tier has max 25 connections total.
+// With 50 concurrent serverless fns × max=2 = 100 would still exceed the cap.
+// At max=2 we handle bursts gracefully with PgBouncer queueing the rest.
 const pool = new Pool({
   connectionString,
-  max: 10,
-  idleTimeoutMillis: 30000,
+  max: 2,
+  idleTimeoutMillis: 10000,
   connectionTimeoutMillis: 5000,
 });
 
