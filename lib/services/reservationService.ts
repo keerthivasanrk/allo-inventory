@@ -1,6 +1,5 @@
-﻿import {
+import {
   Prisma,
-  PrismaClient,
   ReservationStatus,
 } from '@prisma/client'
 import { 
@@ -11,8 +10,7 @@ import {
   ExpiredReservationError,
   InvalidReservationStateError
 } from '@/lib/errors'
-
-const prisma = new PrismaClient()
+import { prisma } from '@/lib/db'
 
 export interface ReservationItemResponse {
   productId: string
@@ -135,7 +133,9 @@ export async function reserve(
         error.message.includes('deadlock') ||
         error.message.includes('serialization')
       ) {
-        throw new DatabaseError(error.message)
+        // A lock failure means another transaction is modifying the stock.
+        // We gracefully fail this request as a conflict (409) rather than a 500 error.
+        return null
       }
       throw new DatabaseError(`Unexpected database error: ${error.message}`)
     }
@@ -318,5 +318,52 @@ export class ReservationService {
 
       throw new DatabaseError('Unknown release failure')
     }
+  }
+
+  /**
+   * Finds all pending reservations that have passed their expiresAt timestamp
+   * and releases each one atomically.
+   * Safe to call from a cron job or API route — idempotent per reservation.
+   * Returns the count of reservations actually released.
+   */
+  static async getReleaseExpired(): Promise<number> {
+    const now = new Date()
+
+    // Fetch IDs only — each release is its own transaction
+    const expired = await prisma.reservation.findMany({
+      where: {
+        status: ReservationStatus.pending,
+        expiresAt: { lt: now },
+      },
+      select: { id: true },
+    })
+
+    if (expired.length === 0) {
+      console.log('[getReleaseExpired] No expired reservations found')
+      return 0
+    }
+
+    console.log(`[getReleaseExpired] Found ${expired.length} expired reservation(s) — releasing...`)
+
+    let releasedCount = 0
+
+    for (const { id } of expired) {
+      try {
+        const released = await ReservationService.releaseReservation(id)
+        if (released) {
+          releasedCount++
+          console.log(`[getReleaseExpired] Released reservation ${id}`)
+        } else {
+          // Already released or confirmed between our SELECT and transaction — skip
+          console.log(`[getReleaseExpired] Skipped reservation ${id} (already processed)`)
+        }
+      } catch (error) {
+        // Log and continue — don't let one failure abort the rest
+        console.error(`[getReleaseExpired] Failed to release reservation ${id}:`, error)
+      }
+    }
+
+    console.log(`[getReleaseExpired] Done — released ${releasedCount}/${expired.length}`)
+    return releasedCount
   }
 }
