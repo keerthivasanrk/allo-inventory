@@ -68,8 +68,8 @@ export const options = {
  */
 
 const BASE_URL = __ENV.BASE_URL ?? 'http://localhost:3000'
-const LAST_UNIT_PRODUCT = 'product_last_unit'
-const WAREHOUSE_ID = 'warehouse_1'
+const LAST_UNIT_PRODUCT = '11111111-1111-1111-1111-111111111111'
+const WAREHOUSE_ID = '22222222-2222-2222-2222-222222222222'
 
 /**
  * --------------------------------------------------------
