@@ -32,7 +32,8 @@ export async function GET(): Promise<NextResponse> {
       count: warehouses.length,
     });
 
-    const response = warehouses.map((w) => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response = warehouses.map((w: any) => ({
       id: w.id,
       name: w.name,
       location: w.location,

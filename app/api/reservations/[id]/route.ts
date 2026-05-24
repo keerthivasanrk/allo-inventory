@@ -85,7 +85,8 @@ export async function GET(
       releasedAt: reservation.releasedAt?.toISOString() ?? null,
       expiresInSeconds,
       isExpired,
-      items: reservation.items.map((item) => ({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      items: reservation.items.map((item: any) => ({
         id: item.id,
         productId: item.productId,
         warehouseId: item.warehouseId,
