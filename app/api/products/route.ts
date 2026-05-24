@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
@@ -113,17 +114,28 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         orderBy: { createdAt: "desc" },
       });
 
-      const response: ProductWithWarehouseStock[] = stockRows.map((row) => ({
-        id: row.product.id,
-        name: row.product.name,
-        description: row.product.description,
-        price: Number(row.product.price),
-        stock: {
-          total: row.totalUnits,
-          reserved: row.reservedUnits,
-          available: row.totalUnits - row.reservedUnits,
-        },
-      }));
+      const response: ProductWithWarehouseStock[] = stockRows.map(
+        (row: {
+          totalUnits: number;
+          reservedUnits: number;
+          product: {
+            id: string;
+            name: string;
+            description: string | null;
+            price: Prisma.Decimal;
+          };
+        }) => ({
+          id: row.product.id,
+          name: row.product.name,
+          description: row.product.description,
+          price: Number(row.product.price),
+          stock: {
+            total: row.totalUnits,
+            reserved: row.reservedUnits,
+            available: row.totalUnits - row.reservedUnits,
+          },
+        }),
+      );
 
       return NextResponse.json(response, { status: 200 });
     }
@@ -148,18 +160,30 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       orderBy: { createdAt: "desc" },
     });
 
-    const response: ProductWithAllWarehouses[] = products.map((product) => ({
-      id: product.id,
-      name: product.name,
-      description: product.description,
-      price: Number(product.price),
-      warehouses: product.stock.map((stock) => ({
-        warehouseId: stock.warehouseId,
-        total: stock.totalUnits,
-        reserved: stock.reservedUnits,
-        available: stock.totalUnits - stock.reservedUnits,
-      })),
-    }));
+    const response: ProductWithAllWarehouses[] = products.map(
+      (product: {
+        id: string;
+        name: string;
+        description: string | null;
+        price: Prisma.Decimal;
+        stock: Array<{
+          warehouseId: string;
+          totalUnits: number;
+          reservedUnits: number;
+        }>;
+      }) => ({
+        id: product.id,
+        name: product.name,
+        description: product.description,
+        price: Number(product.price),
+        warehouses: product.stock.map((stock) => ({
+          warehouseId: stock.warehouseId,
+          total: stock.totalUnits,
+          reserved: stock.reservedUnits,
+          available: stock.totalUnits - stock.reservedUnits,
+        })),
+      }),
+    );
 
     return NextResponse.json(response, { status: 200 });
   } catch (error: unknown) {
