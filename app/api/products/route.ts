@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import crypto from "crypto";
 import { prisma } from "@/lib/db";
@@ -118,11 +117,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         (row: {
           totalUnits: number;
           reservedUnits: number;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           product: {
             id: string;
             name: string;
             description: string | null;
-            price: Prisma.Decimal;
+            price: any;
           };
         }) => ({
           id: row.product.id,
@@ -165,7 +165,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         id: string;
         name: string;
         description: string | null;
-        price: Prisma.Decimal;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        price: any;
         stock: Array<{
           warehouseId: string;
           totalUnits: number;
