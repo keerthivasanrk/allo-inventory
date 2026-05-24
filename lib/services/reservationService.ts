@@ -113,7 +113,7 @@ export async function reserve(
         } satisfies ReservationResponse
       },
       {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
       },
     )
 
@@ -122,25 +122,28 @@ export async function reserve(
     if (error instanceof ValidationError) throw error
     if (error instanceof OutOfStockError) return null
 
+    // PostgreSQL NOWAIT lock conflict (Prisma variant)
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2034') {
+        return null // Transaction conflict
+      }
       throw new DatabaseError(`Database transaction failed: ${error.message}`)
     }
 
-    if (error instanceof Error) {
-      if (
-        error.message.includes('FOR UPDATE') ||
+    // PostgreSQL raw lock error
+    if (
+      error instanceof Error &&
+      (error.message.includes('55P03') ||
         error.message.includes('could not obtain lock') ||
-        error.message.includes('deadlock') ||
-        error.message.includes('serialization')
-      ) {
-        // A lock failure means another transaction is modifying the stock.
-        // We gracefully fail this request as a conflict (409) rather than a 500 error.
-        return null
-      }
-      throw new DatabaseError(`Unexpected database error: ${error.message}`)
+        error.message.includes('lock_not_available') ||
+        error.message.includes('deadlock detected') ||
+        error.message.includes('serialization'))
+    ) {
+      return null
     }
 
-    throw new DatabaseError('Unknown reservation failure')
+    console.error('[reserve] Unexpected database error', error)
+    throw new DatabaseError('Reservation transaction failed')
   }
 }
 

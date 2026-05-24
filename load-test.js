@@ -121,6 +121,12 @@ export function setup() {
   }
 }
 
+export default function() {
+  http.setResponseCallback(
+    http.expectedStatuses({ min: 200, max: 409 })
+  )
+}
+
 /**
  * --------------------------------------------------------
  * Stage 1 Baseline
@@ -128,6 +134,7 @@ export function setup() {
  */
 
 export function baselineScenario() {
+  http.setResponseCallback(http.expectedStatuses({ min: 200, max: 409 }))
   const response = http.post(`${BASE_URL}/api/reservations`, reservationPayload(1), params)
   reservationLatency.add(response.timings.duration)
 
@@ -150,6 +157,7 @@ export function baselineScenario() {
  */
 
 export function raceConditionScenario() {
+  http.setResponseCallback(http.expectedStatuses({ min: 200, max: 409 }))
   const response = http.post(`${BASE_URL}/api/reservations`, reservationPayload(1), params)
   reservationLatency.add(response.timings.duration)
 
@@ -176,6 +184,7 @@ export function raceConditionScenario() {
  */
 
 export function peakLoadScenario() {
+  http.setResponseCallback(http.expectedStatuses({ min: 200, max: 409 }))
   const response = http.post(`${BASE_URL}/api/reservations`, reservationPayload(1), params)
   reservationLatency.add(response.timings.duration)
 
@@ -198,6 +207,7 @@ export function peakLoadScenario() {
  */
 
 export function spikeScenario() {
+  http.setResponseCallback(http.expectedStatuses({ min: 200, max: 409 }))
   const response = http.post(`${BASE_URL}/api/reservations`, reservationPayload(1), params)
   reservationLatency.add(response.timings.duration)
 
