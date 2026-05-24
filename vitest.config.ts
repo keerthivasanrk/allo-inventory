@@ -1,14 +1,17 @@
-import { defineConfig } from 'vitest/config'
-import path from 'path'
+import { defineConfig } from "vitest/config";
+import path from "path";
+import dotenv from "dotenv";
+
+dotenv.config({ path: ".env.local" });
 
 export default defineConfig({
   test: {
     globals: true,
-    environment: 'node',
+    environment: "node",
     coverage: {
-      provider: 'v8',
-      reporter: ['text', 'json', 'html'],
-      include: ['lib/services/**/*.ts', 'services/**/*.ts'],
+      provider: "v8",
+      reporter: ["text", "json", "html"],
+      include: ["lib/services/**/*.ts", "services/**/*.ts"],
       thresholds: {
         lines: 80,
         functions: 80,
@@ -18,11 +21,11 @@ export default defineConfig({
     },
   },
   esbuild: {
-    jsx: 'automatic',
+    jsx: "automatic",
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, '.'),
+      "@": path.resolve(__dirname, "."),
     },
   },
-})
+});

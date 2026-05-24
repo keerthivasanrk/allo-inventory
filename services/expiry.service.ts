@@ -1,18 +1,13 @@
-import {
-  Prisma,
-  PrismaClient,
-  ReservationStatus,
-} from '@prisma/client'
-
-const prisma = new PrismaClient()
+import { Prisma, ReservationStatus } from "@prisma/client";
+import prisma from "@/lib/db";
 
 /**
  * Cleanup service result.
  */
 export interface ExpiryCleanupResult {
-  processed: number
-  released: number
-  failed: number
+  processed: number;
+  released: number;
+  failed: number;
 }
 
 /**
@@ -20,8 +15,8 @@ export interface ExpiryCleanupResult {
  */
 export class ExpiryServiceError extends Error {
   constructor(message: string) {
-    super(message)
-    this.name = 'ExpiryServiceError'
+    super(message);
+    this.name = "ExpiryServiceError";
   }
 }
 
@@ -51,25 +46,27 @@ export class ExpiryService {
            */
           const reservations = await tx.$queryRaw<
             Array<{
-              id: string
-              status: ReservationStatus
+              id: string;
+              status: ReservationStatus;
             }>
           >`
             SELECT *
             FROM "Reservation"
             WHERE "id" = ${reservationId}
             FOR UPDATE NOWAIT
-          `
+          `;
 
           /**
            * Missing reservation
            */
           if (reservations.length === 0) {
-            console.warn('[ExpiryService] Reservation missing', { reservationId })
-            return false
+            console.warn("[ExpiryService] Reservation missing", {
+              reservationId,
+            });
+            return false;
           }
 
-          const reservation = reservations[0]
+          const reservation = reservations[0];
 
           /**
            * Skip terminal states
@@ -78,11 +75,11 @@ export class ExpiryService {
             reservation.status === ReservationStatus.released ||
             reservation.status === ReservationStatus.confirmed
           ) {
-            console.info('[ExpiryService] Reservation already processed', {
+            console.info("[ExpiryService] Reservation already processed", {
               reservationId,
               status: reservation.status,
-            })
-            return false
+            });
+            return false;
           }
 
           /**
@@ -90,7 +87,7 @@ export class ExpiryService {
            */
           const items = await tx.reservationItem.findMany({
             where: { reservationId },
-          })
+          });
 
           /**
            * Release stock safely
@@ -105,7 +102,7 @@ export class ExpiryService {
               WHERE "productId" = ${item.productId}
                 AND "warehouseId" = ${item.warehouseId}
               FOR UPDATE
-            `
+            `;
 
             /**
              * Prevent negative reserved units
@@ -122,7 +119,7 @@ export class ExpiryService {
                   decrement: item.quantity,
                 },
               },
-            })
+            });
           }
 
           /**
@@ -134,22 +131,25 @@ export class ExpiryService {
               status: ReservationStatus.released,
               releasedAt: new Date(),
             },
-          })
+          });
 
-          return true
+          return true;
         },
         {
           isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-        }
-      )
+        },
+      );
 
-      return released
+      return released;
     } catch (error: unknown) {
-      console.error('[ExpiryService] Failed to expire reservation', {
+      console.error("[ExpiryService] Failed to expire reservation", {
         reservationId,
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
-      })
-      return false
+        error:
+          error instanceof Error
+            ? { name: error.name, message: error.message }
+            : error,
+      });
+      return false;
     }
   }
 
@@ -157,9 +157,11 @@ export class ExpiryService {
    * Releases all expired pending reservations.
    */
   static async releaseExpiredReservations(): Promise<ExpiryCleanupResult> {
-    const startedAt = new Date()
+    const startedAt = new Date();
 
-    console.info('[ExpiryService] Cleanup started', { timestamp: startedAt.toISOString() })
+    console.info("[ExpiryService] Cleanup started", {
+      timestamp: startedAt.toISOString(),
+    });
 
     try {
       /**
@@ -171,58 +173,65 @@ export class ExpiryService {
           expiresAt: { lt: new Date() },
         },
         select: { id: true, expiresAt: true },
-        orderBy: { expiresAt: 'asc' },
-      })
+        orderBy: { expiresAt: "asc" },
+      });
 
-      console.info('[ExpiryService] Expired reservations found', { count: expiredReservations.length })
+      console.info("[ExpiryService] Expired reservations found", {
+        count: expiredReservations.length,
+      });
 
-      let released = 0
-      let failed = 0
+      let released = 0;
+      let failed = 0;
 
       /**
        * Sequential processing prevents lock storms under heavy load.
        */
       for (const reservation of expiredReservations) {
         try {
-          const success = await this.markAsExpired(reservation.id)
+          const success = await this.markAsExpired(reservation.id);
 
           if (success) {
-            released += 1
-            console.info('[ExpiryService] Reservation released', { reservationId: reservation.id })
+            released += 1;
+            console.info("[ExpiryService] Reservation released", {
+              reservationId: reservation.id,
+            });
           }
         } catch (error) {
-          failed += 1
-          console.error('[ExpiryService] Failed processing reservation', {
+          failed += 1;
+          console.error("[ExpiryService] Failed processing reservation", {
             reservationId: reservation.id,
             error: error instanceof Error ? { message: error.message } : error,
-          })
+          });
         }
       }
 
-      const completedAt = new Date()
+      const completedAt = new Date();
 
-      console.info('[ExpiryService] Cleanup completed', {
+      console.info("[ExpiryService] Cleanup completed", {
         startedAt: startedAt.toISOString(),
         completedAt: completedAt.toISOString(),
         durationMs: completedAt.getTime() - startedAt.getTime(),
         processed: expiredReservations.length,
         released,
         failed,
-      })
+      });
 
       return {
         processed: expiredReservations.length,
         released,
         failed,
-      }
+      };
     } catch (error: unknown) {
-      console.error('[ExpiryService] Cleanup fatal error', {
-        error: error instanceof Error ? { name: error.name, message: error.message } : error,
-      })
+      console.error("[ExpiryService] Cleanup fatal error", {
+        error:
+          error instanceof Error
+            ? { name: error.name, message: error.message }
+            : error,
+      });
 
       throw new ExpiryServiceError(
-        error instanceof Error ? error.message : 'Unknown cleanup failure'
-      )
+        error instanceof Error ? error.message : "Unknown cleanup failure",
+      );
     }
   }
 }

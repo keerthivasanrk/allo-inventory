@@ -1,36 +1,156 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Allo Inventory Reservation System
 
-## Getting Started
+## 1. Overview
 
-First, run the development server:
+A high-concurrency, ACID-compliant inventory reservation system built with Next.js, Prisma, and PostgreSQL. It is designed to handle flash sales and heavy spikes in traffic, guaranteeing that no overselling (double-booking) ever occurs, even when hundreds of concurrent requests attempt to purchase the exact same inventory item simultaneously.
+
+This system guarantees stock correctness by leveraging database-level row locks and strict transaction isolation levels, rather than relying on application-level locks which are prone to race conditions in a distributed environment.
+
+## 2. Architecture Diagram
+
+```text
+  Client Load (e.g., k6 100 VUs)
+          │
+          ▼
+ ┌─────────────────────────┐
+ │ Next.js API Routes      │
+ │ (Serverless/Node.js)    │
+ └────────┬────────────────┘
+          │ Prisma Client
+          ▼
+ ┌─────────────────────────┐
+ │ PostgreSQL Database     │
+ │ - Row-level Locking     │
+ │ - ACID Transactions     │
+ └─────────────────────────┘
+```
+
+## 3. Race Condition Solution
+
+The hardest problem in e-commerce inventory is **race conditions**. If two users read `available = 1` at the exact same millisecond, they might both pass validation and deduct the inventory, resulting in `available = -1` (overselling).
+
+**How we solved it:**
+We use a pessimistic locking strategy utilizing PostgreSQL's `SELECT ... FOR UPDATE NOWAIT` inside an explicit transaction.
+
+1. **Locking:** When a reservation is requested, we lock the specific inventory row using `FOR UPDATE NOWAIT`.
+2. **Atomicity:** The `NOWAIT` modifier ensures that if another concurrent request is currently processing a reservation for this exact product, the new request will immediately fail with a lock acquisition error rather than queueing up and exhausting the database connection pool.
+3. **Graceful Degradation:** The API elegantly catches these lock errors and returns a `409 Conflict` (or service unavailable), telling the client that the inventory is highly contested.
+4. **Validation:** All stock deduction logic happens entirely inside the locked transaction.
+
+## 4. Getting Started
+
+### Prerequisites
+
+- Node.js (v18+)
+- PostgreSQL (Local or Cloud e.g., Neon/Supabase)
+- npm or yarn
+
+### Environment Setup
+
+Create a `.env` file in the root directory:
+
+```env
+DATABASE_URL="postgresql://user:password@localhost:5432/allo_inventory?schema=public"
+```
+
+### Database Setup
+
+Apply migrations and seed the database with initial products and warehouses:
+
+```bash
+npm install
+npx prisma generate
+npx prisma migrate dev
+npm run db:seed
+```
+
+### Running Locally
+
+Start the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The server will be available at `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 5. API Documentation
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Endpoints
 
-## Learn More
+| Method | Endpoint                         | Description                                       |
+| ------ | -------------------------------- | ------------------------------------------------- |
+| `POST` | `/api/reservations`              | Create a new temporary inventory reservation      |
+| `POST` | `/api/reservations/[id]/confirm` | Confirm an active reservation (finalize purchase) |
+| `POST` | `/api/reservations/[id]/release` | Cancel/release an active reservation back to pool |
 
-To learn more about Next.js, take a look at the following resources:
+### Example Request (Create Reservation)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+curl -X POST http://localhost:3000/api/reservations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "productId": "11111111-1111-1111-1111-000000000001",
+    "warehouseId": "22222222-2222-2222-2222-000000000001",
+    "quantity": 1,
+    "customerId": "user_123"
+  }'
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Response Codes
 
-## Deploy on Vercel
+- `201 Created`: Reservation successful.
+- `400 Bad Request`: Invalid payload or missing fields.
+- `404 Not Found`: Product or warehouse doesn't exist.
+- `409 Conflict`: Insufficient stock OR high contention (try again).
+- `500 Internal Server Error`: Unexpected database failure.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 6. Features
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Pessimistic Row-Level Locking:** Eliminates overselling completely.
+- **Graceful Conflict Handling:** High-contention returns 409s instantly to protect the DB pool.
+- **Strict Quality Guardrails:** Pre-commit hooks enforce TypeScript `noEmit` and ESLint flat config standards automatically.
+- **Automated Expiry:** System supports cron/background jobs to reap abandoned reservations after TTL expires.
+
+## 7. Testing
+
+### Unit & Integration Tests
+
+We use **Vitest** for isolated unit testing and database-integrated tests.
+
+```bash
+npm run test:unit
+npm run test:integration
+```
+
+### Load Testing
+
+We use **k6** to simulate extreme spike traffic (e.g., flash sales). Tests prove the system can handle intense lock contention without data corruption.
+
+```bash
+# Test single-row extreme contention correctness
+k6 run load-test.js
+
+# Test distributed scale and throughput (250+ req/sec)
+k6 run realistic_load_test.js
+```
+
+## 8. Deployment
+
+1. Connect the repository to **Vercel**.
+2. Provision a PostgreSQL database (e.g., Neon serverless Postgres).
+3. Set `DATABASE_URL` in the Vercel Environment Variables.
+4. Add the deployment hook/build command: `npx prisma generate && npx prisma migrate deploy && next build`.
+
+## 9. Trade-offs
+
+- **Pessimistic Locking vs. Optimistic Concurrency:** We chose pessimistic locking (`FOR UPDATE`) for strict correctness. Optimistic locking (using a `version` integer) might offer higher theoretical throughput but results in heavy retry loops on the application server during flash sales.
+- **NOWAIT modifier:** We use `NOWAIT` to fail fast. The trade-off is that valid users might get rejected if the lock is held for just a few milliseconds. A short queue or bounded wait (e.g., `pg_advisory_xact_lock`) could smooth this out, but `NOWAIT` maximizes database stability.
+
+## 10. What I'd do differently
+
+If building this for a massive global scale (like Amazon or Ticketmaster):
+
+1. **In-Memory Cache (Redis):** Add a Redis layer in front of PostgreSQL. Maintain a fast `available_count` in Redis to reject requests _before_ they ever hit the database, protecting Postgres entirely once stock hits zero.
+2. **Event-Driven Queue:** Instead of synchronous HTTP requests hitting the DB, ingest reservations into Kafka or SQS. A background worker would pull off the queue sequentially, entirely avoiding DB-level lock contention.
+3. **Database Sharding:** Shard the inventory tables by `warehouseId` so that heavy load on one warehouse doesn't impact operations on another.
