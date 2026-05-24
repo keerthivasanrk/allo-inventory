@@ -122,10 +122,15 @@ export async function reserve(
     if (error instanceof ValidationError) throw error
     if (error instanceof OutOfStockError) return null
 
-    // PostgreSQL NOWAIT lock conflict (Prisma variant)
+    // Prisma errors
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === 'P2034') {
         return null // Transaction conflict
+      }
+      if (error.code === 'P2024' || error.code === 'P1008') {
+        // Connection pool exhausted or operation timed out under heavy load
+        // Drop request gracefully as conflict/overload
+        return null 
       }
       throw new DatabaseError(`Database transaction failed: ${error.message}`)
     }
