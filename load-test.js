@@ -92,9 +92,14 @@ function customerId() {
   });
 }
 
+const PRODUCT_IDS = Array.from({ length: 10 }).map((_, i) => 
+  `11111111-1111-1111-1111-${String(i + 1).padStart(12, '0')}`
+)
+
 function reservationPayload(quantity = 1) {
+  const randomProduct = PRODUCT_IDS[Math.floor(Math.random() * PRODUCT_IDS.length)]
   return JSON.stringify({
-    productId: LAST_UNIT_PRODUCT,
+    productId: randomProduct,
     warehouseId: WAREHOUSE_ID,
     quantity,
     customerId: customerId(),
@@ -138,6 +143,10 @@ export function baselineScenario() {
   const response = http.post(`${BASE_URL}/api/reservations`, reservationPayload(1), params)
   reservationLatency.add(response.timings.duration)
 
+  if (response.status !== 201 && response.status !== 409) {
+    console.log(`Unexpected status: ${response.status} Body: ${response.body}`)
+  }
+
   const success = check(response, {
     'baseline status valid': (r) => r.status === 201 || r.status === 409,
   })
@@ -160,6 +169,10 @@ export function raceConditionScenario() {
   http.setResponseCallback(http.expectedStatuses({ min: 200, max: 409 }))
   const response = http.post(`${BASE_URL}/api/reservations`, reservationPayload(1), params)
   reservationLatency.add(response.timings.duration)
+
+  if (response.status !== 201 && response.status !== 409) {
+    console.log(`Unexpected status: ${response.status} Body: ${response.body}`)
+  }
 
   const success = check(response, {
     'race condition response valid': (r) => r.status === 201 || r.status === 409,
@@ -188,6 +201,10 @@ export function peakLoadScenario() {
   const response = http.post(`${BASE_URL}/api/reservations`, reservationPayload(1), params)
   reservationLatency.add(response.timings.duration)
 
+  if (response.status !== 201 && response.status !== 409) {
+    console.log(`Unexpected status: ${response.status} Body: ${response.body}`)
+  }
+
   const success = check(response, {
     'peak load valid response': (r) => r.status === 201 || r.status === 409,
   })
@@ -210,6 +227,10 @@ export function spikeScenario() {
   http.setResponseCallback(http.expectedStatuses({ min: 200, max: 409 }))
   const response = http.post(`${BASE_URL}/api/reservations`, reservationPayload(1), params)
   reservationLatency.add(response.timings.duration)
+
+  if (response.status !== 201 && response.status !== 409) {
+    console.log(`Unexpected status: ${response.status} Body: ${response.body}`)
+  }
 
   const success = check(response, {
     'spike response valid': (r) => r.status === 201 || r.status === 409,
