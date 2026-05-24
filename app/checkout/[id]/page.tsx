@@ -202,57 +202,25 @@ function CheckoutContent({
   )
 }
 
+import { ApiError, useApi } from '@/lib/hooks/useApi'
+import { ErrorDisplay } from '@/components/error/ErrorDisplay'
+
 export default function CheckoutPage() {
   const params = useParams()
   const router = useRouter()
   const reservationId = params.id as string
 
-  const [reservation, setReservation] = useState<ReservationResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data: reservation, loading, error, setError } = useApi<ReservationResponse>(
+    `/api/reservations/${reservationId}`
+  )
   const [actionLoading, setActionLoading] = useState(false)
 
-  async function fetchReservation() {
-    try {
-      setLoading(true)
-      setError(null)
-
-      const response = await fetch(`/api/reservations/${reservationId}`)
-
-      if (response.status === 404) {
-        setError('Reservation not found')
-        return
-      }
-
-      if (response.status === 410) {
-        setError('Reservation expired, returned to inventory')
-        return
-      }
-
-      if (!response.ok) {
-        throw new Error('Failed to load reservation')
-      }
-
-      const data = (await response.json()) as ReservationResponse
-
-      if (data.status !== 'pending') {
-        setError('Already processed')
-        return
-      }
-
-      setReservation(data)
-    } catch (error) {
-      console.error(error)
-      setError(error instanceof Error ? error.message : 'Unknown error')
-      toast.error('Failed to load reservation')
-    } finally {
-      setLoading(false)
-    }
-  }
-
+  // Use useEffect to catch 'already processed' which is technically not an HTTP error code in the GET response
   useEffect(() => {
-    void fetchReservation()
-  }, [reservationId])
+    if (reservation && reservation.status !== 'pending') {
+      setError(new ApiError('Reservation already processed', 400))
+    }
+  }, [reservation, setError])
 
   async function handleConfirm() {
     if (!reservation) return
@@ -265,13 +233,13 @@ export default function CheckoutPage() {
 
       if (response.status === 410) {
         toast.error('Reservation expired')
-        setError('Reservation expired, returned to inventory')
+        setError(new ApiError('Reservation expired, returned to inventory', 410))
         return
       }
 
       if (response.status === 400) {
         toast.error('Reservation already processed')
-        setError('Already processed')
+        setError(new ApiError('Reservation already processed', 400))
         return
       }
 
@@ -283,8 +251,8 @@ export default function CheckoutPage() {
       setTimeout(() => {
         router.push('/products')
       }, 2000)
-    } catch (error) {
-      console.error(error)
+    } catch (err) {
+      console.error(err)
       toast.error('Failed to confirm reservation')
     } finally {
       setActionLoading(false)
@@ -308,8 +276,8 @@ export default function CheckoutPage() {
       setTimeout(() => {
         router.push('/products')
       }, 1500)
-    } catch (error) {
-      console.error(error)
+    } catch (err) {
+      console.error(err)
       toast.error('Failed to cancel reservation')
     } finally {
       setActionLoading(false)
@@ -324,19 +292,17 @@ export default function CheckoutPage() {
     )
   }
 
-  if (error) {
+  if (error || (reservation && reservation.status !== 'pending')) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
         <Card className="w-full max-w-md">
-          <CardContent className="space-y-6 pt-6 text-center">
-            <div className="text-xl font-semibold text-red-600">
-              {error}
-            </div>
+          <CardContent className="space-y-6 pt-6 text-center text-left">
+            <ErrorDisplay error={error} />
             <div className="flex justify-center gap-3">
               <Button variant="outline" onClick={() => router.push('/products')}>
                 Back to Products
               </Button>
-              <Button onClick={() => void fetchReservation()}>
+              <Button onClick={() => window.location.reload()}>
                 Retry
               </Button>
             </div>
