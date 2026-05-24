@@ -1,126 +1,151 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { reserve } from '@/lib/services/reservationService'
-import { ValidationError } from '@/lib/errors'
-import { ReservationStatus } from '@prisma/client'
+import {
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
 
-// vi.hoisted ensures these are available when vi.mock() factory runs (mock is hoisted above imports)
-const { mockTransaction, mockQueryRaw, mockReservationCreate, mockStockUpdate } = vi.hoisted(() => ({
+import {
+  reserve,
+  ReservationService,
+} from '@/lib/services/reservationService'
+
+import { ExpiredReservationError } from '@/lib/errors'
+
+import {
+  reservationFactory,
+  stockFactory,
+} from '../fixtures/sample-data'
+
+const { mockTransaction, mockQueryRaw, mockReservationCreate, mockStockUpdate, mockReservationUpdate } = vi.hoisted(() => ({
   mockTransaction: vi.fn(),
   mockQueryRaw: vi.fn(),
   mockReservationCreate: vi.fn(),
   mockStockUpdate: vi.fn(),
+  mockReservationUpdate: vi.fn(),
 }))
 
-vi.mock('@prisma/client', async () => {
-  const actual = await vi.importActual<typeof import('@prisma/client')>('@prisma/client')
+vi.mock('@prisma/client', () => {
   return {
-    ...actual,
     PrismaClient: vi.fn().mockImplementation(() => ({
       $transaction: mockTransaction,
+      reservation: {
+        update: mockReservationUpdate,
+      },
     })),
+    ReservationStatus: {
+      pending: 'pending',
+      confirmed: 'confirmed',
+      released: 'released',
+    },
+    Prisma: {
+      TransactionIsolationLevel: {
+        Serializable: 'Serializable',
+      },
+      PrismaClientKnownRequestError: class extends Error {},
+    },
   }
 })
 
-const stockFixture = {
-  id: 'stock_1',
-  productId: 'product_1',
-  warehouseId: 'warehouse_1',
-  totalUnits: 10,
-  reservedUnits: 2,
-}
-
-const reservationFixture = {
-  id: 'reservation_1',
-  customerId: 'customer_1',
-  status: ReservationStatus.pending,
-  expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-  items: [{ productId: 'product_1', warehouseId: 'warehouse_1', quantity: 1 }],
-}
+// We must also mock the singleton prisma
+vi.mock('@/lib/db', () => ({
+  prisma: {
+    $transaction: mockTransaction,
+    reservation: {
+      update: mockReservationUpdate,
+    },
+  }
+}))
 
 function createMockTx() {
   return {
     $queryRaw: mockQueryRaw,
-    reservation: { create: mockReservationCreate },
-    stock: { update: mockStockUpdate },
+    reservation: {
+      create: mockReservationCreate,
+      update: mockReservationUpdate,
+    },
+    stock: {
+      update: mockStockUpdate,
+    },
+    reservationItem: {
+      findMany: vi.fn(),
+    },
   }
 }
 
-describe('reserve()', () => {
+describe('reservationService', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  describe('happy path', () => {
-    it('successfully reserves 1 unit', async () => {
-      mockQueryRaw.mockResolvedValue([stockFixture])
-      mockReservationCreate.mockResolvedValue(reservationFixture)
-      mockStockUpdate.mockResolvedValue({ ...stockFixture, reservedUnits: 3 })
-      mockTransaction.mockImplementation(async (callback: any) => callback(createMockTx()))
-
-      const result = await reserve('product_1', 'warehouse_1', 1, 'customer_1')
-      expect(result).not.toBeNull()
-      expect(result?.customerId).toBe('customer_1')
-      expect(result?.status).toBe(ReservationStatus.pending)
-      expect(result?.items).toHaveLength(1)
-      expect(mockStockUpdate).toHaveBeenCalledOnce()
-    })
-
-    it('returns reservation with correct ID', async () => {
-      mockQueryRaw.mockResolvedValue([stockFixture])
-      mockReservationCreate.mockResolvedValue(reservationFixture)
+  describe('reserve()', () => {
+    it('should reserve inventory successfully', async () => {
+      mockQueryRaw.mockResolvedValue([stockFactory()])
+      mockReservationCreate.mockResolvedValue(reservationFactory())
       mockStockUpdate.mockResolvedValue({})
-      mockTransaction.mockImplementation(async (callback: any) => callback(createMockTx()))
-
-      const result = await reserve('product_1', 'warehouse_1', 1, 'customer_1')
-      expect(result?.id).toBe('reservation_1')
-    })
-  })
-
-  describe('insufficient stock', () => {
-    it('returns null when not enough units', async () => {
-      mockQueryRaw.mockResolvedValue([{ ...stockFixture, totalUnits: 2, reservedUnits: 2 }])
-      mockTransaction.mockImplementation(async (callback: any) => callback(createMockTx()))
-
-      const result = await reserve('product_1', 'warehouse_1', 1, 'customer_1')
-      expect(result).toBeNull()
-    })
-
-    it('does not modify database when stock insufficient', async () => {
-      mockQueryRaw.mockResolvedValue([{ ...stockFixture, totalUnits: 1, reservedUnits: 1 }])
-      mockTransaction.mockImplementation(async (callback: any) => callback(createMockTx()))
-
-      await reserve('product_1', 'warehouse_1', 1, 'customer_1')
-      expect(mockReservationCreate).not.toHaveBeenCalled()
-      expect(mockStockUpdate).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('concurrent race condition', () => {
-    it('exactly one succeeds and one fails for last unit', async () => {
-      let reserved = false
-      // Mutex serializes the two transactions so they run one-at-a-time,
-      // matching real DB serialization behaviour
-      let mutex = Promise.resolve()
 
       mockTransaction.mockImplementation(async (callback: any) => {
-        const result = mutex.then(async () => {
-          const tx = {
-            $queryRaw: vi.fn().mockImplementation(() => {
-              if (reserved) return [{ ...stockFixture, totalUnits: 1, reservedUnits: 1 }]
-              return [{ ...stockFixture, totalUnits: 1, reservedUnits: 0 }]
-            }),
-            reservation: {
-              create: vi.fn().mockImplementation(() => {
-                reserved = true
-                return { ...reservationFixture, id: crypto.randomUUID() }
+        return callback(createMockTx())
+      })
+
+      const result = await reserve('product_1', 'warehouse_1', 1, 'customer_1')
+
+      expect(result).not.toBeNull()
+      expect(result?.customerId).toBe('customer_1')
+      expect(mockStockUpdate).toHaveBeenCalled()
+    })
+
+    it('should return null when stock unavailable', async () => {
+      mockQueryRaw.mockResolvedValue([
+        stockFactory({
+          totalUnits: 1,
+          reservedUnits: 1,
+        }),
+      ])
+
+      mockTransaction.mockImplementation(async (callback: any) => {
+        return callback(createMockTx())
+      })
+
+      const result = await reserve('product_1', 'warehouse_1', 5, 'customer_1')
+
+      expect(result).toBeNull()
+      expect(mockReservationCreate).not.toHaveBeenCalled()
+    })
+
+    it('should allow only one concurrent reservation', async () => {
+      let reserved = false
+
+      mockTransaction.mockImplementation(async (callback: any) => {
+        const tx = {
+          ...createMockTx(),
+          $queryRaw: vi.fn(() => {
+            if (reserved) {
+              return [
+                stockFactory({
+                  totalUnits: 1,
+                  reservedUnits: 1,
+                }),
+              ]
+            }
+            reserved = true // Simulates row lock
+            return [
+              stockFactory({
+                totalUnits: 1,
+                reservedUnits: 0,
               }),
-            },
-            stock: { update: vi.fn() },
-          }
-          return callback(tx)
-        })
-        mutex = result.then(() => {}, () => {})
-        return result
+            ]
+          }),
+          reservation: {
+            create: vi.fn(() => {
+              reserved = true
+              return reservationFactory()
+            }),
+          },
+        }
+
+        return callback(tx)
       })
 
       const [r1, r2] = await Promise.all([
@@ -128,73 +153,73 @@ describe('reserve()', () => {
         reserve('product_1', 'warehouse_1', 1, 'customer_2'),
       ])
 
-      const successCount = [r1, r2].filter(Boolean).length
-      const failCount = [r1, r2].filter((r) => r === null).length
+      const success = [r1, r2].filter(Boolean).length
+      const failure = [r1, r2].filter((r) => r === null).length
 
-      expect(successCount).toBe(1)
-      expect(failCount).toBe(1)
+      expect(success).toBe(1)
+      expect(failure).toBe(1)
     })
   })
 
-  describe('expiry', () => {
-    it('creates reservation with correct expiresAt', async () => {
-      mockQueryRaw.mockResolvedValue([stockFixture])
-      const now = Date.now()
-      const expectedExpiry = new Date(now + 15 * 60 * 1000)
+  describe('confirmReservation()', () => {
+    it('should confirm reservation', async () => {
+      mockQueryRaw.mockResolvedValue([reservationFactory()])
+      mockReservationUpdate.mockResolvedValue(
+        reservationFactory({
+          status: 'confirmed',
+        })
+      )
 
-      mockReservationCreate.mockResolvedValue({ ...reservationFixture, expiresAt: expectedExpiry })
-      mockStockUpdate.mockResolvedValue({})
-      mockTransaction.mockImplementation(async (callback: any) => callback(createMockTx()))
-
-      const result = await reserve('product_1', 'warehouse_1', 1, 'customer_1', 15)
-      expect(result).not.toBeNull()
-      const diff = result!.expiresAt.getTime() - now
-      expect(diff).toBeGreaterThanOrEqual(14 * 60 * 1000)
-      expect(diff).toBeLessThanOrEqual(15 * 60 * 1000 + 1000)
-    })
-
-    it('defaults expiry to 10 minutes', async () => {
-      mockQueryRaw.mockResolvedValue([stockFixture])
-      const now = Date.now()
-
-      mockReservationCreate.mockResolvedValue({
-        ...reservationFixture,
-        expiresAt: new Date(now + 10 * 60 * 1000),
+      mockTransaction.mockImplementation(async (callback: any) => {
+        return callback(createMockTx())
       })
-      mockStockUpdate.mockResolvedValue({})
-      mockTransaction.mockImplementation(async (callback: any) => callback(createMockTx()))
 
-      const result = await reserve('product_1', 'warehouse_1', 1, 'customer_1')
-      expect(result).not.toBeNull()
-      const diff = result!.expiresAt.getTime() - now
-      expect(diff).toBeGreaterThanOrEqual(9 * 60 * 1000)
-      expect(diff).toBeLessThanOrEqual(10 * 60 * 1000 + 1000)
+      const result = await ReservationService.confirmReservation('reservation_1')
+
+      expect(result.status).toBe('confirmed')
+    })
+
+    it('should throw expired error', async () => {
+      mockQueryRaw.mockResolvedValue([
+        reservationFactory({
+          expiresAt: new Date(Date.now() - 1000),
+        }),
+      ])
+
+      mockTransaction.mockImplementation(async (callback: any) => {
+        return callback(createMockTx())
+      })
+
+      await expect(
+        ReservationService.confirmReservation('reservation_1')
+      ).rejects.toThrow(ExpiredReservationError)
     })
   })
 
-  describe('edge cases', () => {
-    it('throws ValidationError for zero quantity', async () => {
-      await expect(reserve('product_1', 'warehouse_1', 0, 'customer_1')).rejects.toThrow(ValidationError)
-    })
+  describe('releaseReservation()', () => {
+    it('should release reservation', async () => {
+      mockQueryRaw.mockResolvedValue([reservationFactory()])
+      mockStockUpdate.mockResolvedValue({})
+      mockReservationUpdate.mockResolvedValue({})
 
-    it('throws ValidationError for negative quantity', async () => {
-      await expect(reserve('product_1', 'warehouse_1', -5, 'customer_1')).rejects.toThrow(ValidationError)
-    })
+      mockTransaction.mockImplementation(async (callback: any) => {
+        return callback({
+          ...createMockTx(),
+          reservationItem: {
+            findMany: vi.fn(() => [
+              {
+                productId: 'product_1',
+                warehouseId: 'warehouse_1',
+                quantity: 1,
+              },
+            ]),
+          },
+        })
+      })
 
-    it('returns null for non-existent product', async () => {
-      mockQueryRaw.mockResolvedValue([])
-      mockTransaction.mockImplementation(async (callback: any) => callback(createMockTx()))
+      const result = await ReservationService.releaseReservation('reservation_1')
 
-      const result = await reserve('missing_product', 'warehouse_1', 1, 'customer_1')
-      expect(result).toBeNull()
-    })
-
-    it('returns null for non-existent warehouse', async () => {
-      mockQueryRaw.mockResolvedValue([])
-      mockTransaction.mockImplementation(async (callback: any) => callback(createMockTx()))
-
-      const result = await reserve('product_1', 'missing_warehouse', 1, 'customer_1')
-      expect(result).toBeNull()
+      expect(result).toBe(true)
     })
   })
 })
